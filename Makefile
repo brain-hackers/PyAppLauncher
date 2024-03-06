@@ -25,6 +25,6 @@ clean:
 format:
 	clang-format -i *.c *.h
 
-PyAppLauncher.exe: main.c
-	$(CXX) main.c -o PyAppMain.exe $(CXXFLAGS)
-	$(STRIP) PyAppMain.exe
+$(OUTPUT): main.c
+	$(CXX) main.c -o $@ $(CXXFLAGS)
+	$(STRIP) $@
