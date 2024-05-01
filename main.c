@@ -6,7 +6,7 @@
 
 // searchPath + "\\python(X.Y)\\python(X.Y).exe"
 
-wchar_t *searchPathes[] = {
+const wchar_t *searchPathes[] = {
     L"\\Storage Card", 
     L"\\NAND3",
     L".",
@@ -26,7 +26,7 @@ struct PythonVersion {
 struct PythonVersionCondition {
     unsigned int mode;
     PythonVersion *version;
-}
+};
 
 #define PY_VER_ARBITRARY    0 // no-prefix
 #define PY_VER_COMPATIBLE   1 // ~=
@@ -39,7 +39,7 @@ struct PyAppData {
   wchar_t curPath[MAX_PATH+1];
   wchar_t pythonPath[MAX_PATH+1];
   char *args;
-  PythonVersionCondition pyVersions[127];
+  PythonVersionCondition *pyVersions[127];
   int pyVersionCount;
   wchar_t *environs[127];
   int environCount;
@@ -67,7 +67,7 @@ GetPyVersion(char *verstr, PythonVersion *pyver)
 
     pyver->release[0] = '\0';    
 
-    strcpy(verstr, tmp);
+    strcpy(tmp, verstr);
 
     s = tmp;
     t = tmp;
@@ -79,7 +79,7 @@ GetPyVersion(char *verstr, PythonVersion *pyver)
         s++;
     } else if (*s == '\0' && s != t) {
         pyver->major = atoi(t);
-    pyver->significantDigits = 1;
+        pyver->significantDigits = 1;
         return 1;
     } else
         return 0;
@@ -111,18 +111,16 @@ GetPyVersion(char *verstr, PythonVersion *pyver)
     char *u, *v;
     u = s;
     if (*s == 'a') {
-        strcpy("a", pyver->release);
+        strcpy(pyver->release, "a");
         u++;
     } else if (*s == 'b') {
-        strcpy("b", pyver->release);
+        strcpy(pyver->release, "b");
         u++;
-    } else if (*s == 'rc') {
-        strcpy("rc", pyver->release);
+    } else if (*s == 'r' && *(s+1) == 'c') {
+        strcpy(pyver->release, "rc");
         u += 2;
     } else if (*s == '\0' || *s == '+') {
-        if (s - t == 1) {
-            return 0;
-        }
+        return 1;
     } else {
         return 0;
     }
@@ -134,7 +132,7 @@ GetPyVersion(char *verstr, PythonVersion *pyver)
         t = u;
         s = t + strspn(t, "0123456789");
         if (*s == '+')
-            *s = '\0'
+            *s = '\0';
 
         if (*s != '\0')
             return 0;
@@ -151,7 +149,7 @@ LoadConfig(PyAppData *config)
     char *c, *d, *e;
     static wchar_t *wtext;
     char *text;
-    int textlen;
+    long unsigned int textlen;
     wchar_t filename[MAX_PATH+1];
 
     char newline[3] = "\r\n";
@@ -170,7 +168,7 @@ LoadConfig(PyAppData *config)
 
         textlen = 0;
 
-        int written = 0;
+        long unsigned int written = 0;
         if (!WriteFile(hFile, text, textlen, &written, NULL)) {
             CloseHandle(hFile);
             return -1;
@@ -232,9 +230,9 @@ LoadConfig(PyAppData *config)
             // handle
 
             if (!strcmp(keystr, "python")) {
-                if (*(config->pythonPath) != '\0')
+                if (*(config->pythonPath) != L'\0')
                     goto error;
-                strcpy(config->pythonPath, valstr);
+                MultiByteToWideChar(CP_UTF8, 0, valstr, -1, config->pythonPath, MAX_PATH+1);
             } else if (!strcmp(keystr, "args")) {
                 if (config->args != NULL)
                     goto error;
@@ -243,7 +241,7 @@ LoadConfig(PyAppData *config)
                     goto error;
                 strcpy(config->args, valstr);
             } else if (!strcmp(keystr, "version")) {
-                if (config->versions[0] != NULL)
+                if (config->pyVersions[0] != NULL)
                     goto error;
                 char *s;
                 s = valstr;
@@ -251,20 +249,18 @@ LoadConfig(PyAppData *config)
                     PythonVersionCondition cond = {0};
                     PythonVersion pyver = {0};
 
-                    if (cond == NULL)
-                        goto error;
-                    if (strspn(s, "0123456789") == 0) {
+                    if (strcspn(s, "0123456789") == 0) {
                         // arbitrary equality
-                        cond->mode = PY_VER_ARBITRARY;
+                        cond.mode = PY_VER_ARBITRARY;
                     } else if (strspn(s, "<>=~") == 1) {
                         // exclusive ordered comparison
                         if (strspn(s, "<>") == 0) {
                             goto error;
                         }
                         if (*s == '<') {
-                            cond->mode = PY_VER_SMALLER;
+                            cond.mode = PY_VER_SMALLER;
                         } else if (*s == '>') {
-                            cond->mode = PY_VER_BIGGER;
+                            cond.mode = PY_VER_BIGGER;
                         } else {
                             goto error;
                         }
@@ -273,11 +269,11 @@ LoadConfig(PyAppData *config)
                             goto error;
                         }
                         if (*s == '~') {
-                            cond->mode = PY_VER_COMPATIBLE;
+                            cond.mode = PY_VER_COMPATIBLE;
                         } else if (*s == '<') {
-                            cond->mode = PY_VER_SMALLER_EQ;
+                            cond.mode = PY_VER_SMALLER_EQ;
                         } else if (*s == '>') {
-                            cond->mode = PY_VER_BIGGER_EQ;
+                            cond.mode = PY_VER_BIGGER_EQ;
                         } else {
                             goto error;
                         }
@@ -287,8 +283,12 @@ LoadConfig(PyAppData *config)
                     s += strspn(s, "<>=~ ");
 
                     size_t verlen = strcspn(s, ", ");
-                    char *verstr = calloc(verlen+1, sizeof(char));
-                    strncpy(s, verstr, verlen);
+                    char *verstr = (char *)calloc(verlen+1, sizeof(char));
+                    if (verstr == NULL)
+                        goto error;
+                    strncpy(verstr, s, verlen);
+                    s += verlen;
+                    s += strspn(s, ", ");
 
                     if (!GetPyVersion(verstr, &pyver)) {
                         free(verstr);
@@ -296,28 +296,36 @@ LoadConfig(PyAppData *config)
                     }
                     free(verstr);
 
-                    if (conf->pyVersionCount == 127) {
+                    if (config->pyVersionCount == 127) {
                         goto error;
                     }
 
                     PythonVersionCondition *cond2;
 
-                    cond2 = calloc(1, sizeof(PyVersionCondition));
+                    cond.version = (PythonVersion *)calloc(1, sizeof(PythonVersion));
+                    if (cond.version == NULL) {
+                        goto error;
+                    }
+                    memcpy(cond.version, &pyver, sizeof(PythonVersion));
+
+                    cond2 = (PythonVersionCondition *)calloc(1, sizeof(PythonVersionCondition));
                     if (cond2 == NULL) {
+                        free(cond.version);
                         goto error;
                     }
 
-                    memcpy(cond2, cond, sizeof(PyVersionCondition));
-                    conf->pyVersions[conf->pyVersionCount] = cond2;
-                    conf->pyVersionCount++;
+                    memcpy(cond2, &cond, sizeof(PythonVersionCondition));
+                    config->pyVersions[config->pyVersionCount] = cond2;
+                    config->pyVersionCount++;
                 }
             } else if (!strcmp(valstr, "environ_file")) {
                 if (config->environCount > 0) {
                     goto error;
                 }
-                char *s;
-                s = calloc(strlen(valstr)+1, sizeof(char));
-                strcpy(s, valstr);
+                wchar_t *s;
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, valstr, -1, NULL, 0);
+                s = (wchar_t *)calloc(wlen, sizeof(wchar_t));
+                MultiByteToWideChar(CP_UTF8, 0, valstr, -1, s, wlen);
                 config->environs[0] = s;
                 config->environCount = -1;
             } else if (!(valstr, "environ_file_", 13)) {
@@ -325,9 +333,10 @@ LoadConfig(PyAppData *config)
                     if (config->environCount == 127) {
                         goto error;
                     }
-                    char *s;
-                    s = (char *)calloc(strlen(valstr)+1, sizeof(char));
-                    strcpy(s, valstr);
+                wchar_t *s;
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, valstr, -1, NULL, 0);
+                s = (wchar_t *)calloc(wlen, sizeof(wchar_t));
+                MultiByteToWideChar(CP_UTF8, 0, valstr, -1, s, wlen);
                     config->environs[config->environCount+1] = s;
                     config->environCount++;
                 } else {
@@ -360,62 +369,84 @@ int checkPythonVersion(PythonVersion *pyver, PythonVersionCondition *cond)
     if (cond->mode == PY_VER_BIGGER || cond->mode == PY_VER_BIGGER_EQ || cond->mode == PY_VER_COMPATIBLE) {
         if (pyver->major < cond->version->major)
             result = 0;
-        else if (pyver->minor < cond->version->minor)
-            result = 0;
-        else if (pyver->micro < cond->version->micro)
-            result = 0;
-        else {
-            int release;
-            if (pyver->release[0] == 'a')
-                release = 0;
-            else if (pyver->release[0] == 'b')
-                release = 1;
-            else if (pyver->release[0] == 'r')
-                release = 2;
-            else
-                release = 3;
-
-            if ((cond->version->release[0] == 'a' && release == 0 && !eq) ||
-                (cond->version->release[0] == 'b' && release <= 1 && !(eq && release == 1)) ||
-                (cond->version->release[0] == 'r' && release <= 2 && !(eq && release == 2)) ||
-                release == 3 && !eq)
-                retult = 0;
-            else if (pyver->serial < cond->version->serial || !eq && pyver->serial == cond->version->serial)
+        else if (pyver->major == cond->version->major) {
+            if (cond->version->significantDigits == 1 && !eq)
                 result = 0;
+            else if (cond->version->significantDigits > 1 && pyver->minor < cond->version->minor)
+                result = 0;
+            else if (pyver->minor == cond->version->minor) {
+                if (cond->version->significantDigits == 2 && !eq)
+                    result = 0;
+                else if (cond->version->significantDigits > 2 && pyver->micro < cond->version->micro)
+                    result = 0;
+                else if (cond->version->significantDigits >= 3 && pyver->micro == cond->version->micro) {
+                    int release;
+                    if (pyver->release[0] == 'a')
+                        release = 0;
+                    else if (pyver->release[0] == 'b')
+                        release = 1;
+                    else if (pyver->release[0] == 'r')
+                        release = 2;
+                    else
+                        release = 3;
+
+                    if ((cond->version->release[0] == 'a' && release == 0 && !eq) ||
+                        (cond->version->release[0] == 'b' && release <= 1 && !(eq && release == 1)) ||
+                        (cond->version->release[0] == 'r' && release <= 2 && !(eq && release == 2)) ||
+                        release == 3 && !eq)
+                        result = 0;
+                    else if (cond->version->release[0] != pyver->release[0] && pyver->serial < cond->version->serial || !eq && pyver->serial == cond->version->serial)
+                        result = 0;
+                }
+            }
         }
         if (result && cond->mode == PY_VER_COMPATIBLE &&
-            (cond->version->significantDigit < 2 ||
+            (cond->version->significantDigits < 2 ||
             pyver->major != cond->version->major ||
-            cond->version->significantDigit == 3 && pyver->minor != cond->version->minor))
+            cond->version->significantDigits == 3 && pyver->minor != cond->version->minor))
                 result = 0;
     } else if (cond->mode == PY_VER_SMALLER || cond->mode == PY_VER_SMALLER_EQ) {
         if (pyver->major > cond->version->major)
             result = 0;
-        else if (pyver->minor > cond->version->minor)
-            result = 0;
-        else if (pyver->micro > cond->version->micro)
-            result = 0;
-        else {
-            int release;
-            if (pyver->release[0] == 'a')
-                release = 0;
-            else if (pyver->release[0] == 'b')
-                release = 1;
-            else if (pyver->release[0] == 'r')
-                release = 2;
-            else
-                release = 3;
-
-            if ((cond->version->release[0] == 'a' && release >= 0 && !(eq && release == 0)) ||
-                (cond->version->release[0] == 'b' && release >= 1 && !(eq && release == 1)) ||
-                (cond->version->release[0] == 'r' && release >= 2 && !(eq && release == 2)) ||
-                release == 3 && !eq)
-                retult = 0;
-            else if (pyver->serial > cond->version->serial || !eq && pyver->serial == cond->version->serial)
+        else if (pyver->major == cond->version->major) {
+            if (cond->version->significantDigits == 1 && !eq)
                 result = 0;
+            else if (cond->version->significantDigits > 1 && pyver->minor > cond->version->minor)
+                result = 0;
+            else if (pyver->minor == cond->version->minor) {
+                if (cond->version->significantDigits == 2 && !eq)
+                    result = 0;
+                else if (cond->version->significantDigits > 2 && pyver->micro > cond->version->micro)
+                    result = 0;
+                else if (cond->version->significantDigits >= 3 && pyver->micro == cond->version->micro) {
+                    int release;
+                    if (pyver->release[0] == 'a')
+                        release = 0;
+                    else if (pyver->release[0] == 'b')
+                        release = 1;
+                    else if (pyver->release[0] == 'r')
+                        release = 2;
+                    else
+                        release = 3;
+
+                    if ((cond->version->release[0] == 'a' && release >= 0 && !(eq && release == 0)) ||
+                        (cond->version->release[0] == 'b' && release >= 1 && !(eq && release == 1)) ||
+                        (cond->version->release[0] == 'r' && release >= 2 && !(eq && release == 2)) ||
+                        release == 3 && !eq)
+                        result = 0;
+                    else if (cond->version->release[0] != pyver->release[0] && pyver->serial > cond->version->serial || !eq && pyver->serial == cond->version->serial)
+                        result = 0;
+                }
+            }
         }
     } else if (cond->mode == PY_VER_ARBITRARY) {
-        if (pyver->major != cond->version->major || pyver->minor != cond->version->minor || pyver->micro != cond->version->micro || strcmp(pyver->release, cond->version->release) != 0 || pyver->release[0] != '\0' && pyver->serial != cond->version->serial)
+        if (cond->version->significantDigits != pyver->significantDigits)
+            result = 0;
+        else if (pyver->major != cond->version->major)
+            result = 0;
+        else if (cond->version->significantDigits > 1 && pyver->minor != cond->version->minor)
+            result = 0;
+        else if (cond->version->significantDigits > 2 && (pyver->micro != cond->version->micro || strcmp(pyver->release, cond->version->release) != 0 || pyver->release[0] != '\0' && pyver->serial != cond->version->serial))
             result = 0;
     } else {
         result = 0;
@@ -428,10 +459,9 @@ checkPythonPath(PyAppData *config)
 {
     HANDLE handle;
 
-    if (config->pythonPath != NULL) {
-        handle = CreateFile(config->pythonPath, GENERIC_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (GetLastError() != 0) {
-            CloseHandle(handle);
+    if (config->pythonPath[0] != L'\0') {
+        handle = CreateFile(config->pythonPath, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (handle == INVALID_HANDLE_VALUE) {
             return 0;
         }
         CloseHandle(handle);
@@ -445,65 +475,91 @@ checkPythonPath(PyAppData *config)
         PythonVersion pyver2;
         char *verstr;
         PythonVersionCondition *cond;
+        HANDLE handle2;
 
+        OutputDebugStringW(L"0");
         if (!GetPyVersion("0.0.0", &pyver)) {
+            OutputDebugStringW(L"0.0.0 failed.");
             return 0;
         }
 
+        OutputDebugStringW(L"1");
+
         for (i = 0; searchPathes[i] != NULL; i++) {
+            OutputDebugStringW(L"2");
             wcscpy(path, searchPathes[i]);
             if (!wcscmp(path, L".")) {
                 wcscpy(path, config->curPath);
             }
 
-            wcscat(path, L"\\python*\\python*.exe");
+            wcscat(path, L"\\python*");
+            OutputDebugStringW(path);
+            OutputDebugStringW(L"3");
 
             WIN32_FIND_DATA ffd;
+            WIN32_FIND_DATA ffd2;
 
             handle = FindFirstFile(path, &ffd);
             int verlen;
 
             if (handle != INVALID_HANDLE_VALUE) {
                 while (1) {
-                    path2 = ffd.cFileName;
-                    path2 += strlen(searchPathes[i]) + 7;
-                    verlen = wcscspn(path2, "\\");
-                    verstr = (char *)calloc(wcschr(path, verlen+1, sizeof(char)));
-                    if (verstr == NULL) {
-                        FindClose(handle);
-                        return 0;
-                    }
-                    WideCharToMultiByte(CP_ACP, WC_SEPCHARS, path2, verlen, verstr, verlen, NULL, NULL);
-                    if (!GetPyVersion(verstr, &pyver)) {
-                        free(verstr);
-                    } else {
-                        free(verstr);
-                        int k;
-                        int result = (!found || pyver.release[0] == '\0');
-                        for (k = 0; k < config->pyVersionCount && result; k++) {
-                            cond = config->pyVersions[k];
-                            result = checkPythonVersion(&pyver, cond);
-                        }
-                        if (result) {
-                            if (wcscmp(path2 + verlen + 1, L"python.exe") == 0 ||
-                                wcsncmp(path2 - 6, path + verlen + 1, 6 + verlen) == 0 && wcscmp(path2 + verlen*2 + 7, L".exe") == 0) {
-                                if (!found) {
-                                    memcpy(&pyver2, &pyver, sizeof(PythonVersion));
-                                    wcscpy(config->pythonPath, ffd.cFileName);
-                                    found = 1;
+                    OutputDebugStringW(L"4");
+                    swprintf(path, L"%s\\%s\\python*.exe", searchPathes[i], ffd.cFileName);
+                    OutputDebugStringW(path);
+                    handle2 = FindFirstFile(path, &ffd2);
+                    if (handle2 != INVALID_HANDLE_VALUE) {
+                        while (1) {
+                            path2 = ffd2.cFileName;
+                            OutputDebugStringW(path2);
+                            path2 += 6;
+                            verlen = wcslen(path2) - 4;
+                            if (verlen > 0) {
+                                verstr = (char *)calloc(verlen+1, sizeof(char));
+                                if (verstr == NULL) {
+                                    FindClose(handle);
+                                    return 0;
+                                }
+                                WideCharToMultiByte(CP_UTF8, 0, path2, verlen, verstr, verlen, NULL, NULL);
+                                if (!GetPyVersion(verstr, &pyver)) {
+                                    free(verstr);
                                 } else {
-                                    cond = (PythonVersionCondition *)calloc(1, sizeof(PythonVersionCondition));
-                                    if (cond == NULL)
-                                        return 0;
-                                    cond->version = pyver2;
-                                    cond->mode = PY_VER_BIGGER;
-                                    if (checkPythonVersion(&pyver, cond)) {
-                                        memcpy(&pyver2, &pyver, sizeof(PythonVersion));
-                                        wcscpy(config->pythonPath, ffd.cFileName);
+                                    free(verstr);
+                                    int k;
+                                    int result = found == 0 || pyver.release[0] == '\0';
+                                    for (k = 0; k < config->pyVersionCount && result; k++) {
+                                        OutputDebugStringW(L"version check...");
+                                        cond = config->pyVersions[k];
+                                        result = checkPythonVersion(&pyver, cond);
                                     }
-                                    free(cond);
+                                    OutputDebugStringW(L"6");
+                                    if (result) {
+                                        if (wcslen(ffd.cFileName) == 6 || (_wcsnicmp(ffd.cFileName, ffd2.cFileName, verlen+6) == 0 && wcslen(ffd.cFileName) == 6 + verlen)) {
+                                            if (!found) {
+                                                OutputDebugStringW(L"7");
+                                                memcpy(&pyver2, &pyver, sizeof(PythonVersion));
+                                                swprintf(config->pythonPath, L"%s\\%s\\%s", searchPathes[i], ffd.cFileName, ffd2.cFileName);
+                                                found = 1;
+                                            } else {
+                                                OutputDebugStringW(L"8");
+                                                cond = (PythonVersionCondition *)calloc(1, sizeof(PythonVersionCondition));
+                                                if (cond == NULL)
+                                                    return 0;
+                                                cond->version = &pyver2;
+                                                cond->mode = PY_VER_BIGGER;
+                                                if (checkPythonVersion(&pyver, cond)) {
+                                                    memcpy(&pyver2, &pyver, sizeof(PythonVersion));
+                                                    swprintf(config->pythonPath, L"%s\\%s\\%s", searchPathes[i], ffd.cFileName, ffd2.cFileName);
+                                                }
+                                                free(cond);
+                                            }
+                                            OutputDebugStringW(L"9");
+                                        }
+                                    }
                                 }
                             }
+                            if (FindNextFile(handle2, &ffd2) == 0)
+                                break;
                         }
                     }
                     if (FindNextFile(handle, &ffd) == 0)
@@ -521,7 +577,7 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
     wchar_t cmdline[32767];
     PROCESS_INFORMATION procInfo = {0};
 
-    config.pythonPath = NULL;
+    config.pythonPath[0] = L'\0';
 
     // Generate current directory path.
 
@@ -531,7 +587,7 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
 	    return 1;
     }
 
-    wcscpy(config.CurPath, LauncherPath);
+    wcscpy(config.curPath, LauncherPath);
     wchar_t *ch = wcsrchr(config.curPath, L'\\');
     if (ch == NULL) {
         wchar_t *ch = wcsrchr(config.curPath, L'/');
@@ -542,11 +598,17 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
     *ch = L'\0';
 
     if (LoadConfig(&config) < 0) {
+        OutputDebugStringW(L"LoadConfig failed.");
         return 1;
     }
 
     if (!checkPythonPath(&config)) {
+        OutputDebugStringW(L"checkPythonPath failed.");
+        OutputDebugStringW(config.pythonPath);
         return 1;
+    } else {
+        OutputDebugStringW(L"Python executable was found:");
+        OutputDebugStringW(config.pythonPath);
     }
 
     cmdline[0] = L'\0';
@@ -575,7 +637,7 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
     wcscat(cmdline, wargs);
     free(wargs);
 
-    CreateProcess(config.pythonPath, cmdline, NULL, NULL, NULL, &procInfo);
+    CreateProcess(config.pythonPath, cmdline, NULL, NULL, NULL, 0, NULL, NULL, NULL, &procInfo);
 
     return 0;
 }
