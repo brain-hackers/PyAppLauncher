@@ -4,7 +4,7 @@
 
 #define CP_UTF8 65001
 
-// searchPath + "\\python(X.Y)\\python(X.Y).exe"
+// searchPath + "\\python(X.Y)\\pythonX.Y(.Z).exe"
 
 const wchar_t *searchPathes[] = {
     L"\\Storage Card", 
@@ -46,6 +46,115 @@ struct PyAppData {
 };
 
 PyAppData config = {0};
+
+
+#define PATHCCH_NONE 0
+#define PATHCCH_ALLOW_LONG_PATHS 1
+
+#define PATHCCH_E_FILENAME_TOO_LONG \
+    ((HRESULT)0x8000FFFFL) /* FIXME: could not find its actual value */
+
+HRESULT
+PathCchCanonicalizeEx(wchar_t *pszPathOut, size_t cchPathOut, wchar_t *pszPathIn,
+                      unsigned long dwFlags)
+{
+    /* read handed path from the end to the begining so we can make the result without going back */
+    if (!dwFlags & PATHCCH_ALLOW_LONG_PATHS && cchPathOut > MAX_PATH + 1)
+        return E_INVALIDARG;
+
+    int isCur = 0;
+    int isPar = 0;
+    int ignores = 0;
+    HRESULT result = S_OK;
+
+    wchar_t *resPath = (wchar_t *)calloc(cchPathOut, sizeof(wchar_t));
+    wchar_t *tmpPath = (wchar_t *)calloc(cchPathOut, sizeof(wchar_t));
+
+    size_t length = 0;
+    size_t lenTmp = 0;
+
+    int index;
+
+    if (pszPathIn == NULL) {
+        wmemcpy(pszPathOut, L"\0", 1);
+        goto done;
+    }
+
+    index = wcslen(pszPathIn) - 1;
+    if (index < 0) {
+        wmemcpy(pszPathOut, L"\0", 1);
+        goto done;
+    }
+
+    while (index >= 0) {
+        wcsncpy(tmpPath + (lenTmp + isCur + isPar), pszPathIn + index, 1);
+        if ((*(pszPathIn + index) == L'\\' || *(pszPathIn + index) == L'/')) {
+            if (isPar)
+                ignores++;
+            if (!isCur && !ignores) {
+                wcsncpy(resPath + length, L"\\", 1);
+                length++;
+            }
+            if (!isCur && ignores) {
+                ignores--;
+            }
+            lenTmp = 0;
+            isCur = 0;
+            isPar = 0;
+            index--;
+            continue;
+        }
+        if (!lenTmp && !isPar && *(pszPathIn + index) == L'.') {
+            if (!isCur)
+                isCur = 1;
+            else
+                isPar = 1;
+        }
+        else if (isCur && (isPar || *(pszPathIn + index) == L'.')) {
+            if (isPar) {
+                wcsncpy(resPath + length, L"..", 2);
+                length++;
+                isCur = 0;
+                isPar = 0;
+                lenTmp = 2;
+            }
+            else {
+                wcsncpy(resPath + length, L".", 1);
+                isCur = 0;
+                lenTmp = 1;
+            }
+        }
+        if (!(isCur || ignores)) {
+            wcsncpy(resPath + length, pszPathIn + index, 1);
+            length++;
+            lenTmp++;
+        }
+        index--;
+    }
+    if (ignores && *resPath == L'\0' && *tmpPath == L'\0') {
+        wmemcpy(resPath, tmpPath, wcslen(tmpPath));
+        length = lenTmp + isCur + isPar;
+    }
+
+    if (!dwFlags & PATHCCH_ALLOW_LONG_PATHS && length > MAX_PATH) {
+        result = PATHCCH_E_FILENAME_TOO_LONG;
+        goto done;
+    }
+
+    index++;
+    while (index < length) {
+        *(pszPathOut + index) = *(resPath + (length - index - 1));
+        index++;
+    }
+
+    *(pszPathOut + length) = L'\0';
+
+    goto done;
+done:
+    free(tmpPath);
+    free(resPath);
+    return result;
+}
 
 int
 GetPyVersion(char *verstr, PythonVersion *pyver)
@@ -154,7 +263,7 @@ LoadConfig(PyAppData *config)
 
     char newline[3] = "\r\n";
 
-    unsigned int environCount = 0;
+    config->environCount = 0;
 
     HANDLE hFile;
 
@@ -318,7 +427,7 @@ LoadConfig(PyAppData *config)
                     config->pyVersions[config->pyVersionCount] = cond2;
                     config->pyVersionCount++;
                 }
-            } else if (!strcmp(valstr, "environ_file")) {
+            } else if (!strcmp(keystr, "environ_file")) {
                 if (config->environCount > 0) {
                     goto error;
                 }
@@ -328,20 +437,22 @@ LoadConfig(PyAppData *config)
                 MultiByteToWideChar(CP_UTF8, 0, valstr, -1, s, wlen);
                 config->environs[0] = s;
                 config->environCount = -1;
-            } else if (!(valstr, "environ_file_", 13)) {
-                if (config->environCount >= 0 && atoi(valstr+13) == config->environCount + 1) {
+            } else if (!strncmp(keystr, "environ_file_", 13)) {
+                if (config->environCount >= 0 && atoi(keystr+13) == config->environCount + 1) {
                     if (config->environCount == 127) {
                         goto error;
                     }
-                wchar_t *s;
-                int wlen = MultiByteToWideChar(CP_UTF8, 0, valstr, -1, NULL, 0);
-                s = (wchar_t *)calloc(wlen, sizeof(wchar_t));
-                MultiByteToWideChar(CP_UTF8, 0, valstr, -1, s, wlen);
-                    config->environs[config->environCount+1] = s;
+                    wchar_t *s;
+                    int wlen = MultiByteToWideChar(CP_UTF8, 0, valstr, -1, NULL, 0);
+                    s = (wchar_t *)calloc(wlen, sizeof(wchar_t));
+                    MultiByteToWideChar(CP_UTF8, 0, valstr, -1, s, wlen);
+                    config->environs[config->environCount] = s;
                     config->environCount++;
                 } else {
                     goto error;
                 }
+            } else {
+                OutputDebugStringW(L"unknown key, skipping...");
             }
         }
         if (c == NULL)
@@ -477,16 +588,12 @@ checkPythonPath(PyAppData *config)
         PythonVersionCondition *cond;
         HANDLE handle2;
 
-        OutputDebugStringW(L"0");
         if (!GetPyVersion("0.0.0", &pyver)) {
             OutputDebugStringW(L"0.0.0 failed.");
             return 0;
         }
 
-        OutputDebugStringW(L"1");
-
         for (i = 0; searchPathes[i] != NULL; i++) {
-            OutputDebugStringW(L"2");
             wcscpy(path, searchPathes[i]);
             if (!wcscmp(path, L".")) {
                 wcscpy(path, config->curPath);
@@ -494,7 +601,6 @@ checkPythonPath(PyAppData *config)
 
             wcscat(path, L"\\python*");
             OutputDebugStringW(path);
-            OutputDebugStringW(L"3");
 
             WIN32_FIND_DATA ffd;
             WIN32_FIND_DATA ffd2;
@@ -504,7 +610,6 @@ checkPythonPath(PyAppData *config)
 
             if (handle != INVALID_HANDLE_VALUE) {
                 while (1) {
-                    OutputDebugStringW(L"4");
                     swprintf(path, L"%s\\%s\\python*.exe", searchPathes[i], ffd.cFileName);
                     OutputDebugStringW(path);
                     handle2 = FindFirstFile(path, &ffd2);
@@ -532,16 +637,13 @@ checkPythonPath(PyAppData *config)
                                         cond = config->pyVersions[k];
                                         result = checkPythonVersion(&pyver, cond);
                                     }
-                                    OutputDebugStringW(L"6");
                                     if (result) {
                                         if (wcslen(ffd.cFileName) == 6 || (_wcsnicmp(ffd.cFileName, ffd2.cFileName, verlen+6) == 0 && wcslen(ffd.cFileName) == 6 + verlen)) {
                                             if (!found) {
-                                                OutputDebugStringW(L"7");
                                                 memcpy(&pyver2, &pyver, sizeof(PythonVersion));
                                                 swprintf(config->pythonPath, L"%s\\%s\\%s", searchPathes[i], ffd.cFileName, ffd2.cFileName);
                                                 found = 1;
                                             } else {
-                                                OutputDebugStringW(L"8");
                                                 cond = (PythonVersionCondition *)calloc(1, sizeof(PythonVersionCondition));
                                                 if (cond == NULL)
                                                     return 0;
@@ -553,7 +655,6 @@ checkPythonPath(PyAppData *config)
                                                 }
                                                 free(cond);
                                             }
-                                            OutputDebugStringW(L"9");
                                         }
                                     }
                                 }
@@ -575,7 +676,10 @@ checkPythonPath(PyAppData *config)
 int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) {
     wchar_t LauncherPath[MAX_PATH+1];
     wchar_t cmdline[32767];
+    wchar_t tmpPath[MAX_PATH+1];
     PROCESS_INFORMATION procInfo = {0};
+    int k; // for error finish
+    int exitcode = 0;
 
     config.pythonPath[0] = L'\0';
 
@@ -599,13 +703,24 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
 
     if (LoadConfig(&config) < 0) {
         OutputDebugStringW(L"LoadConfig failed.");
-        return 1;
+        goto error;
+    }
+
+    if (config.pythonPath[0] != L'\0') {
+        if (config.pythonPath[0] != L'\\' && config.pythonPath[0] != L'/') {
+            // relative path
+            if (wcslen(config.curPath) + wcslen(config.pythonPath) + 1 > MAX_PATH)
+                goto error;
+            swprintf(tmpPath, L"%s\\%s", config.curPath, config.pythonPath);
+            if (PathCchCanonicalizeEx(config.pythonPath, MAX_PATH+1, tmpPath, 0) != S_OK)
+                goto error;
+        }
     }
 
     if (!checkPythonPath(&config)) {
         OutputDebugStringW(L"checkPythonPath failed.");
         OutputDebugStringW(config.pythonPath);
-        return 1;
+        goto error;
     } else {
         OutputDebugStringW(L"Python executable was found:");
         OutputDebugStringW(config.pythonPath);
@@ -615,13 +730,40 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
 
     if (config.environCount < 0) {
         wcscat(cmdline, L"--env-path \"");
-        wcscat(cmdline, config.environs[0]);
+        if (config.environs[0][0] != L'\\' && config.environs[0][0] != L'/') {
+            // relative path
+            if (wcslen(config.curPath) + wcslen(config.environs[0]) + 1 > MAX_PATH)
+                goto error;
+            swprintf(tmpPath, L"%s\\%s", config.curPath, config.environs[0]);
+            if (PathCchCanonicalizeEx(tmpPath, MAX_PATH+1, tmpPath, 0) != S_OK)
+                goto error;
+        } else {
+            // absolutive path
+            if (PathCchCanonicalizeEx(tmpPath, MAX_PATH+1, config.environs[0], 0) != S_OK)
+                goto error;
+        }
+        wcscat(cmdline, tmpPath);
+        free(config.environs[0]);
         wcscat(cmdline, L"\" ");
     } else if (config.environCount > 0) {
         int i;
         for (i = 0; i < config.environCount; i++) {
             wcscat(cmdline, L"--env-path \"");
-            wcscat(cmdline, config.environs[i]);
+            if (config.environs[i][0] != L'\\' && config.environs[i][0] != L'/') {
+                // relative path
+                if (wcslen(tmpPath) + wcslen(config.environs[i]) + 1 > MAX_PATH)
+                    goto error;
+                swprintf(tmpPath, L"%s\\%s", config.curPath, config.environs[i]);
+                if (PathCchCanonicalizeEx(tmpPath, MAX_PATH+1, tmpPath, 0) != S_OK)
+                    goto error;
+                
+            } else {
+                // absolutive path
+                if (PathCchCanonicalizeEx(tmpPath, MAX_PATH+1, config.environs[i], 0) != S_OK)
+                    goto error;
+            }
+            wcscat(cmdline, tmpPath);
+            free(config.environs[i]);
             wcscat(cmdline, L"\" ");
         }
     }
@@ -631,13 +773,33 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
     length = MultiByteToWideChar(CP_UTF8, 0, config.args, -1, NULL, 0);
     wargs = (wchar_t *)calloc(length, sizeof(wchar_t));
     if (wargs == NULL)
-        return 1;
+        goto error;
 
     MultiByteToWideChar(CP_UTF8, 0, config.args, -1, wargs, length);
     wcscat(cmdline, wargs);
     free(wargs);
 
+    int i;
+    for (i = wcslen(cmdline)-1; i>=0; i--) {
+        if (cmdline[i] == L' ')
+            cmdline[i] = L'\0';
+        else
+            break;
+    }
+
+    OutputDebugStringW(cmdline);
+
     CreateProcess(config.pythonPath, cmdline, NULL, NULL, NULL, 0, NULL, NULL, NULL, &procInfo);
 
-    return 0;
+error:
+    exitcode = 1;
+    for (k=0; k < config.environCount || k==0 && config.environCount < 0; k++) {
+        free(config.environs[k]);
+    }
+done:
+    for (k=0; k < config.pyVersionCount; k++) {
+        free(config.pyVersions[k]->version);
+        free(config.pyVersions[k]);
+    }
+    return exitcode;
 }
