@@ -790,7 +790,9 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
     OutputDebugStringW(cmdline);
 
     CreateProcess(config.pythonPath, cmdline, NULL, NULL, NULL, 0, NULL, NULL, NULL, &procInfo);
-
+#ifdef DEBUG
+    WaitForSingleObject(procInfo.hProcess, INFINITE);
+#endif
 error:
     exitcode = 1;
     for (k=0; k < config.environCount || k==0 && config.environCount < 0; k++) {
