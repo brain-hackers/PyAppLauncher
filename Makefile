@@ -15,15 +15,18 @@ CXXFLAGS= -DEV_PLATFORM_WIN32 -DUNICODE -D_UNICODE -DEV_UNSAFE_SWPRINTF -mwin32 
 -O2 -mcpu=arm926ej-s -D_WIN32_WCE=0x600 -D_LARGEFILE_SOURCE=1 -D_LARGEFILE64_SOURCE=1 \
 -D_FILE_OFFSET_BITS=64 -static
 
-.PHONY: all clean format
+.PHONY: all clean format gen-test
 
-all: $(OUTPUT)
+all: $(OUTPUT) gen-test
 
 clean:
-	rm -f $(OUTPUT)
+	rm -f $(OUTPUT) ./case-test/test-app/PyAppLauncher.exe
 
 format:
 	clang-format -i *.c *.h
+
+gen-test: $(OUTPUT)
+	cp $(OUTPUT) ./case-test/test-app/PyAppLauncher.exe
 
 $(OUTPUT): main.c
 	$(CXX) main.c -o $@ $(CXXFLAGS)

@@ -1,0 +1,122 @@
+[
+    {
+        "config": "args=-m app --show",
+        "success": true
+    },
+    {
+        "config": "args=-m foo --show",
+        "success": false
+    },
+
+    {
+        "config": "args=-m app --show\nenviron_file=environ.ini",
+        "success": true
+    },
+    {
+        "config": "args=-m app --show\nenviron_file_1=environ_1.ini",
+        "success": true
+    },
+    {
+        "config": "args=-m app --show\nenviron_file_1=environ_1.ini\nenviron_file_2=environ_2.ini",
+        "success": true
+    },
+    {
+        "config": "args=-m app --show\nenviron_file=foo.ini",
+        "success": false
+    },
+    {
+        "config": "args=-m app --show\nenviron_file_1=foo.ini",
+        "success": false
+    },
+
+    {
+        "config": "",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.10\npython=..\\..\\python\\python3.10.exe",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.12\npython=\\Storage Card\\python\\python3.12.exe",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.12\nversion=3.12",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.15\nversion=~=3.0",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.13\nversion=<=3.13",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.15\nversion=>=3.13",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.12\nversion=<3.13",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.15\nversion=>3.13",
+        "success": true
+    },
+    {
+        "config": "args=-m app 3.14\nversion=<3.15,>3.10",
+        "success": true
+    },
+
+    {
+        "config": "args=-m app --show",
+        "success": false,
+        "comment": "Remove all python in this case"
+    },
+    {
+        "config": "python=.\\foo\\python3.10.exe",
+        "success": false
+    },
+    {
+        "config": "python=\\Storage Card\\foo\\python3.12.exe",
+        "success": false
+    },
+    {
+        "config": "args=-m app 3.99\nversion=3.99",
+        "success": false
+    },
+    {
+        "config": "args=-m app 3.10.0\nversion=3.10.0",
+        "success": false
+    },
+    {
+        "config": "args=-m app\nversion=~=4.0",
+        "success": false
+    },
+    {
+        "config": "args=-m app\nversion=~=3",
+        "success": false
+    },
+    {
+        "config": "args=-m app\nversion=<=3.9",
+        "success": false
+    },
+    {
+        "config": "args=-m app\nversion=>=3.16",
+        "success": false
+    },
+    {
+        "config": "args=-m app\nversion=<3.10",
+        "success": false
+    },
+    {
+        "config": "args=-m app\nversion=>3.15",
+        "success": false
+    },
+    {
+        "config": "args=-m app\nversion=<3.12,>3.13",
+        "success": false
+    }
+]
