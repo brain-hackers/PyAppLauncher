@@ -726,7 +726,7 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow) 
         OutputDebugStringW(config.pythonPath);
     }
 
-    cmdline[0] = L'\0';
+    swprintf(cmdline, L"--env-set \"PYTHONPATH=%s\" ", config.curPath);
 
     if (config.environCount < 0) {
         wcscat(cmdline, L"--env-path \"");
