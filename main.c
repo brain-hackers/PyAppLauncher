@@ -859,7 +859,11 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow)
         OutputDebugStringW(config.pythonPath);
     }
 
-    swprintf(cmdline, L"--env-set \"PWD=%s\" ", config.curPath);
+    if (wcslen(config.curPath) > 0) {
+        swprintf(cmdline, L"--env-set \"PWD=%s\" ", config.curPath);
+    } else {
+        swprintf(cmdline, L"--env-set PWD=\\ ");
+    }
 
     if (config.environCount < 0)
     {
