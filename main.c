@@ -802,7 +802,6 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow)
     wchar_t LauncherPath[MAX_PATH + 1];
     wchar_t cmdline[32767];
     wchar_t tmpPath[MAX_PATH + 1];
-    HANDLE hEnviron;
     PROCESS_INFORMATION procInfo = {0};
     int k; // for error finish
     int exitcode = 0;
@@ -865,17 +864,6 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPTSTR lpCmd, int nShow)
     } else {
         swprintf(cmdline, L"--env-set PWD=\\ ");
     }
-
-    // Add default environ.ini
-
-    if (wcslen(config.curPath) + 13 > MAX_PATH)
-        goto error;
-    swprintf(tmpPath, L"%s\\environ.ini", config.curPath);
-
-    hEnviron = CreateFile(tmpPath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    CloseHandle(hEnviron);
-
-    swprintf(cmdline, L"--env-path \"%s\" ", tmpPath);
 
     // Add additional environment files
 
