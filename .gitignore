@@ -2,3 +2,11 @@
 *.exe
 *.o
 
+config.status
+config.log
+configure~
+autom4te.cache/*
+case-test/__pycache__/*
+case-test/test-app/app/*
+case-test/test-app/app/__pycache__/*
+case-test/test-app/config.ini
